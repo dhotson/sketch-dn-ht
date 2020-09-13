@@ -1,0 +1,35 @@
+{
+  "name": "sketch.dn.ht",
+  "version": "1.0.0",
+  "main": "src/server.ts",
+  "license": "MIT",
+  "scripts": {
+    "watch": "nodemon --watch src/**.tsx --exec yarn build",
+    "start-dev": "nodemon src/server.ts",
+    "build": "esbuild --sourcemap --bundle src/client.tsx --outfile=public/client.js ",
+    "start": "ts-node src/server.ts"
+  },
+  "dependencies": {
+    "@tsconfig/recommended": "^1.0.1",
+    "@types/express": "^4.17.8",
+    "@types/node": "^14.6.4",
+    "@types/sharp": "^0.25.1",
+    "@types/ws": "^7.2.6",
+    "@yr/monotone-cubic-spline": "^1.0.3",
+    "automerge": "^0.14.1",
+    "esbuild": "^0.7.1",
+    "express": "^4.17.1",
+    "fast-json-patch": "^3.0.0-1",
+    "jsondiffpatch": "^0.4.1",
+    "lodash.throttle": "^4.1.1",
+    "nodemon": "^2.0.4",
+    "preact": "^10.4.8",
+    "prettier": "^2.1.1",
+    "simplify-js": "^1.2.4",
+    "simplify-ts": "^1.0.2",
+    "svg-catmull-rom-spline": "^0.0.1",
+    "ts-node": "^9.0.0",
+    "typescript": "^4.0.2",
+    "ws": "^7.3.1"
+  }
+}
