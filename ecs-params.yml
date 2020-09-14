@@ -4,4 +4,4 @@ task_definition:
     web:
       cpu_shares: 0
       mem_limit: 1.0GB
-      mem_reservation: 64MB
+      mem_reservation: 32MB

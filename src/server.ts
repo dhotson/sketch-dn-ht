@@ -19,8 +19,21 @@ const server = app.listen(PORT, () => {
   console.log(`Listening on ${PORT}`);
 });
 
-app.get("/health", (req, res) => {
+let doc: Doc = init();
+const clients: { [key: string]: Client } = {};
+
+app.get("/", (req, res) => {
   res.send("SKETCH HEALTHY");
+});
+
+app.get("/sketch.json", (req, res) => {
+  res.setHeader("Content-Type", "application/json");
+  res.send(
+    JSON.stringify({
+      doc,
+      clients: Object.keys(clients),
+    })
+  );
 });
 
 app.use("/sketch", express.static("public"));
@@ -30,10 +43,6 @@ type Client = {
   socket: WebSocket;
   shadow: Doc;
 };
-
-let doc: Doc = init();
-
-const clients: { [key: string]: Client } = {};
 
 const update = () => {
   Object.values(clients).map((client) => {

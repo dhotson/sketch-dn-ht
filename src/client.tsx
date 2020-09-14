@@ -3,6 +3,7 @@ import { svgPath, points } from "@yr/monotone-cubic-spline";
 import "preact/debug";
 import { h, render, Component, Fragment } from "preact";
 import * as automerge from "automerge";
+// @ts-ignore
 import throttle from "lodash.throttle";
 
 import { Doc, Point, Path, init, updateCursor, updateCurrentPath } from "./doc";
@@ -46,7 +47,10 @@ class App extends Component<{}, State> {
   }
 
   componentDidMount() {
-    const socket = new WebSocket("ws://localhost:8000/sketch/ws");
+    const scheme = window.location.protocol === "https:" ? "wss:" : "ws:";
+    const host = window.location.host;
+
+    const socket = new WebSocket(`${scheme}//${host}/sketch/ws`);
     this.setState({ socket });
 
     socket.addEventListener("open", (event) => {
@@ -94,7 +98,7 @@ class App extends Component<{}, State> {
 
     window.addEventListener("keyup", (e) => {
       console.log(e);
-      // Ctrl-N - new drawing
+      // Ctrl-N - new drawing / clear the screen
       if (e.code === "KeyN" && e.ctrlKey) {
         this.setState(
           {
@@ -164,8 +168,8 @@ class App extends Component<{}, State> {
   }
 
   update = throttle(() => {
-    const { local, remote } = this.state;
-    if (local === null || remote === null) return;
+    const { local, remote, socket } = this.state;
+    if (local === null || remote === null || socket === null) return;
 
     const delta = patcher.diff(remote, local);
 
@@ -174,7 +178,7 @@ class App extends Component<{}, State> {
       // console.log(this.state.remote);
       // console.log(this.state.local);
       // console.log("DELTA", delta);
-      this.socket?.send(JSON.stringify({ delta }));
+      socket.send(JSON.stringify({ delta }));
 
       this.setState(({ local }) => ({
         remote: local,
