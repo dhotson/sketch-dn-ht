@@ -6,6 +6,18 @@ import { Doc, init } from "./doc";
 import { patcher } from "./patcher";
 import * as crypto from "crypto";
 
+import process from "process";
+
+process.on("SIGINT", () => {
+  console.info("Interrupted");
+  process.exit(0);
+});
+
+process.on("SIGTERM", () => {
+  console.info("SIGTERM");
+  process.exit(0);
+});
+
 const clone = (o: unknown) => JSON.parse(JSON.stringify(o));
 
 const id = (type: string) =>
@@ -47,7 +59,7 @@ type Client = {
 const update = () => {
   Object.values(clients).map((client) => {
     const delta = patcher.diff(client.shadow, doc);
-    if (delta) {
+    if (delta.length > 0) {
       client.socket.send(JSON.stringify({ delta }));
       client.shadow = doc;
     }

@@ -1,6 +1,14 @@
 <html>
 <head>
 <style>
+@font-face {
+  font-family: "ISO";
+  font-weight: 400;
+  src:
+    url("https://dn.ht/ISOv0.7-Regular.woff2") format("woff2"),
+    url("https://dn.ht/ISOv0.7-Regular.woff") format("woff");
+}
+
 html, body {
   margin: 0;
   padding: 0;
@@ -9,17 +17,26 @@ html, body {
   font-size: 32px;
   color: #666;
   cursor: none;
+  user-select: none;
 }
 
-input {
+input, .label {
   background: none;
   border: none;
+  padding: 0;
+  font-family: "ISO", monospace;
   font-size: 32px;
   color: #FFF;
   position: absolute;
   outline: none;
   position: absolute;
+  text-shadow: 0px 1px 1px rgba(0,0,0,0.6);
 }
+
+::-webkit-input-placeholder { color: rgba(255,255,255,0.2); text-shadow: 0 0 4px rgba(0,0,0,0.1); }
+::-moz-placeholder { color: rgba(255,255,255,0.2); text-shadow: 0 0 4px rgba(0,0,0,0.1); } /* firefox 19+ */
+:-ms-input-placeholder { color: rgba(255,255,255,0.2); text-shadow: 0 0 4px rgba(0,0,0,0.1); } /* ie */
+input:-moz-placeholder { color: rgba(255,255,255,0.2); text-shadow: 0 0 4px rgba(0,0,0,0.1); }
 
 svg {
   position: absolute;

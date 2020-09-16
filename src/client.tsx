@@ -6,7 +6,15 @@ import * as automerge from "automerge";
 // @ts-ignore
 import throttle from "lodash.throttle";
 
-import { Doc, Point, Path, init, updateCursor, updateCurrentPath } from "./doc";
+import {
+  Doc,
+  Point,
+  Path,
+  Label,
+  init,
+  updateCursor,
+  updateCurrentPath,
+} from "./doc";
 import { patcher } from "./patcher";
 import * as jsondiffpatch from "jsondiffpatch";
 import { Simplify } from "simplify-ts";
@@ -22,39 +30,163 @@ const id = (type: string) =>
 const devicePixelRatio = window.devicePixelRatio || 1;
 
 type State = {
-  socket: WebSocket | null;
   me: string | null;
   local: Doc | null;
   remote: Doc | null;
   currentPath: Path | null;
+  currentLabel: Label | null;
+  originOffset: { x: number; y: number };
 };
 
 class App extends Component<{}, State> {
+  socket: WebSocket | null = null;
+
   constructor() {
     super();
 
     this.state = {
-      socket: null,
       me: null,
       local: null,
       remote: null,
       currentPath: null,
+      currentLabel: null,
+      originOffset: {
+        x: 0,
+        y: 0,
+      },
     };
   }
 
-  get socket() {
-    return this.state.socket;
-  }
+  handleMouseDown = (e: MouseEvent) => {
+    const point = this.fromScreen({ x: e.clientX, y: e.clientY });
+    this.setState({
+      currentPath: {
+        id: id("p"),
+        color,
+        points: [point],
+      },
+    });
+  };
+
+  handleMouseMove = (e: MouseEvent) => {
+    if (!this.state.me || !this.state.local) return;
+
+    const point = this.fromScreen({ x: e.clientX, y: e.clientY });
+
+    let { local, me, currentPath } = this.state;
+
+    currentPath = currentPath && {
+      ...currentPath,
+      points: [...currentPath.points, point],
+    };
+
+    local = updateCursor(local, me, point, color);
+    local = updateCurrentPath(local, currentPath);
+
+    this.setState(
+      {
+        currentPath,
+        local,
+      },
+      this.update
+    );
+  };
+
+  handleMouseUp = (e: MouseEvent) => {
+    if (!this.state.currentPath || !this.state.local) return;
+
+    if (this.state.currentPath.points.length < 4) {
+      this.setState({
+        currentLabel: {
+          id: id("l"),
+          text: "",
+          color: color,
+          pos: this.fromScreen({ x: e.clientX, y: e.clientY }),
+        },
+        currentPath: null,
+      });
+      return;
+    }
+    const point = { x: e.clientX, y: e.clientY };
+
+    const { currentPath, local } = this.state;
+
+    const simplified = Simplify(currentPath.points, 0.5, true);
+
+    this.setState({
+      local: {
+        ...local,
+        paths: {
+          ...local.paths,
+          [currentPath.id]: {
+            ...local.paths[currentPath.id],
+            points: simplified,
+          },
+        },
+      },
+      currentPath: null,
+    });
+  };
+
+  handleWheel = (e: MouseWheelEvent) => {
+    const { x, y } = this.state.originOffset;
+    this.setState({
+      originOffset: {
+        x: x + e.deltaX,
+        y: y + e.deltaY,
+      },
+    });
+  };
+
+  handleKeyUp = (e: KeyboardEvent) => {
+    // Escape - cancel current label
+    if (e.code === "Escape") {
+      this.setState({
+        currentLabel: null,
+      });
+    }
+
+    // Ctrl-N - new drawing / clear the screen
+    if (e.ctrlKey && e.code === "KeyN") {
+      this.setState(
+        {
+          local: init(),
+        },
+        this.update
+      );
+    }
+  };
 
   componentDidMount() {
+    this.connect();
+
+    window.addEventListener("mousedown", this.handleMouseDown);
+    window.addEventListener("mousemove", this.handleMouseMove);
+    window.addEventListener("mouseup", this.handleMouseUp);
+    window.addEventListener("wheel", this.handleWheel);
+
+    window.addEventListener("keyup", this.handleKeyUp);
+  }
+
+  connect = () => {
     const scheme = window.location.protocol === "https:" ? "wss:" : "ws:";
     const host = window.location.host;
 
-    const socket = new WebSocket(`${scheme}//${host}/sketch/ws`);
-    this.setState({ socket });
+    const socket = (this.socket = new WebSocket(
+      `${scheme}//${host}/sketch/ws`
+    ));
 
     socket.addEventListener("open", (event) => {
-      // console.log("Open");
+      console.log("Open");
+    });
+
+    socket.addEventListener("error", (event) => {
+      console.error(event);
+      setTimeout(this.connect, 500);
+    });
+
+    socket.addEventListener("close", (event) => {
+      setTimeout(() => this.connect(), 1000);
     });
 
     socket.addEventListener("message", (event) => {
@@ -84,101 +216,21 @@ class App extends Component<{}, State> {
         }
       }
     });
-
-    document.addEventListener("mousedown", (e) => {
-      const point = { x: e.clientX, y: e.clientY };
-      this.setState({
-        currentPath: {
-          id: id("p"),
-          color,
-          points: [point],
-        },
-      });
-    });
-
-    window.addEventListener("keyup", (e) => {
-      console.log(e);
-      // Ctrl-N - new drawing / clear the screen
-      if (e.code === "KeyN" && e.ctrlKey) {
-        this.setState(
-          {
-            local: init(),
-          },
-          this.update
-        );
-      }
-    });
-    document.addEventListener("dblclick", function (e) {
-      console.log("dblclick");
-    });
-
-    document.addEventListener("mouseup", (e) => {
-      if (!this.state.currentPath || !this.state.local) return;
-
-      if (this.state.currentPath.points.length < 4) {
-        this.setState({
-          currentPath: null,
-        });
-        return;
-      }
-      const point = { x: e.clientX, y: e.clientY };
-
-      const { currentPath, local } = this.state;
-
-      const simplified = Simplify(currentPath.points, 0.5, true);
-
-      this.setState({
-        local: {
-          ...local,
-          paths: {
-            ...local.paths,
-            [currentPath.id]: {
-              ...local.paths[currentPath.id],
-              points: simplified,
-            },
-          },
-        },
-        currentPath: null,
-      });
-    });
-
-    document.addEventListener("mousemove", (e) => {
-      if (!this.state.me || !this.state.local) return;
-
-      const point = { x: e.clientX, y: e.clientY };
-
-      let { local, me, currentPath } = this.state;
-
-      currentPath = currentPath && {
-        ...currentPath,
-        points: [...currentPath.points, point],
-      };
-
-      local = updateCursor(local, me, point, color);
-      local = updateCurrentPath(local, currentPath);
-
-      this.setState(
-        {
-          currentPath,
-          local,
-        },
-        this.update
-      );
-    });
-  }
+  };
 
   update = throttle(() => {
-    const { local, remote, socket } = this.state;
-    if (local === null || remote === null || socket === null) return;
+    const { local, remote } = this.state;
+    if (local === null || remote === null || this.socket === null) return;
 
     const delta = patcher.diff(remote, local);
 
     if (delta.length > 0) {
-      // console.log("------");
-      // console.log(this.state.remote);
-      // console.log(this.state.local);
-      // console.log("DELTA", delta);
-      socket.send(JSON.stringify({ delta }));
+      try {
+        this.socket.send(JSON.stringify({ delta }));
+      } catch (e) {
+        console.error(e);
+        setTimeout(this.update, 100);
+      }
 
       this.setState(({ local }) => ({
         remote: local,
@@ -186,8 +238,24 @@ class App extends Component<{}, State> {
     }
   }, 100);
 
+  toScreen = ({ x, y }: Point): Point => {
+    return {
+      x: x + this.state.originOffset.x,
+      y: y + this.state.originOffset.y,
+    };
+  };
+
+  fromScreen = ({ x, y }: Point): Point => {
+    return {
+      x: x - this.state.originOffset.x,
+      y: y - this.state.originOffset.y,
+    };
+  };
+
   render() {
     if (!this.state.local) return null;
+
+    const { local, currentLabel, currentPath } = this.state;
 
     return (
       <>
@@ -207,20 +275,86 @@ class App extends Component<{}, State> {
               fill="transparent"
               // style="filter:url(#line-shadow);"
               vector-effect="non-scaling-stroke"
-              d={svgPath(points(path.points.map((p) => [p.x, p.y])))}
+              d={svgPath(
+                points(path.points.map(this.toScreen).map((p) => [p.x, p.y]))
+              )}
             />
           </svg>
         ))}
-        <svg xmlns="http://www.w3.org/2000/svg" width="100%" height="100%">
+        {Object.values(this.state.local.labels).map((label) => {
+          return (
+            <span
+              className="label"
+              key={label.id}
+              style={{
+                left: this.toScreen(label.pos).x,
+                top: this.toScreen(label.pos).y - 32,
+                color: label.color,
+              }}
+            >
+              {label.text}
+            </span>
+          );
+        })}
+
+        {currentLabel && (
+          <input
+            style={{
+              left: this.toScreen(currentLabel.pos).x,
+              top: this.toScreen(currentLabel.pos).y - 32,
+              color: currentLabel.color,
+            }}
+            type="text"
+            placeholder="Say something..."
+            onBlur={(e) => {
+              // this.setState({ currentLabel: null });
+            }}
+            onKeyDown={(e) => {
+              if (currentLabel === null) return;
+              if (e.target === null) return;
+
+              if (e.key === "Enter") {
+                this.setState(
+                  {
+                    local: {
+                      ...local,
+                      labels: {
+                        ...local.labels,
+                        [currentLabel.id]: {
+                          ...currentLabel,
+                          text: (e.target as HTMLInputElement).value,
+                        },
+                      },
+                    },
+                    currentLabel: null,
+                  },
+                  this.update
+                );
+              }
+            }}
+            ref={(e) => {
+              if (e) e.focus();
+            }}
+          />
+        )}
+        <svg
+          xmlns="http://www.w3.org/2000/svg"
+          width="100%"
+          height="100%"
+          style={{
+            filter: currentPath
+              ? "drop-shadow(0px 0px 7px #fff)"
+              : "drop-shadow(0px 0px 3px #fff)",
+          }}
+        >
           {Object.values(this.state.local.cursors).map((cursor, i) => (
             <rect
               key={i}
-              x={cursor.x - 2}
-              y={cursor.y - 2}
+              x={this.toScreen(cursor).x - 2}
+              y={this.toScreen(cursor).y - 2}
               width={4}
               height={4}
               fill={cursor.color}
-              // style="filter:url(#shadow-normal);"
               rx={0}
             />
           ))}

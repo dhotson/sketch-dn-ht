@@ -6,6 +6,13 @@ export type Path = {
   points: Point[];
 };
 
+export type Label = {
+  id: string;
+  color: string;
+  text: string;
+  pos: Point;
+};
+
 export type Doc = {
   cursors: {
     [userId: string]: { x: number; y: number; color: string };
@@ -13,11 +20,15 @@ export type Doc = {
   paths: {
     [id: string]: Path;
   };
+  labels: {
+    [id: string]: Label;
+  };
 };
 
 export const init = (): Doc => ({
   cursors: {},
   paths: {},
+  labels: {},
 });
 
 export const updateCursor = (
