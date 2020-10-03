@@ -4,7 +4,7 @@
   "main": "src/server.ts",
   "license": "MIT",
   "scripts": {
-    "watch": "nodemon --watch src/**.tsx --exec yarn build",
+    "watch": "nodemon --watch src/client.tsx --exec yarn build",
     "start-dev": "nodemon src/server.ts",
     "build": "esbuild --sourcemap --bundle src/client.tsx --outfile=public/client.js ",
     "start": "ts-node src/server.ts"

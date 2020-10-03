@@ -1,370 +1,415 @@
 // @ts-ignore
-import { svgPath, points } from "@yr/monotone-cubic-spline";
-import "preact/debug";
-import { h, render, Component, Fragment } from "preact";
-import * as automerge from "automerge";
+import spline from "@yr/monotone-cubic-spline";
 // @ts-ignore
 import throttle from "lodash.throttle";
 
-import {
-  Doc,
-  Point,
-  Path,
-  Label,
-  init,
-  updateCursor,
-  updateCurrentPath,
-} from "./doc";
+import { Doc, Point, Points, Path, Label, init, updateCursor } from "./doc";
 import { patcher } from "./patcher";
 import * as jsondiffpatch from "jsondiffpatch";
 import { Simplify } from "simplify-ts";
 
-const n = Math.round(Math.random() * 1000);
-const colors = ["#3DE4B5", "#43B6E8", "#FFE65B", "#FF5F48", "#FFFFFF"];
-const color = colors[n % colors.length];
-
-const clone = (o: unknown) => JSON.parse(JSON.stringify(o));
 const id = (type: string) =>
   `${type}-${Math.round(Math.random() * 36 ** 5).toString(36)}`;
 
-const devicePixelRatio = window.devicePixelRatio || 1;
-
-type State = {
-  me: string | null;
-  local: Doc | null;
-  remote: Doc | null;
-  currentPath: Path | null;
-  currentLabel: Label | null;
-  originOffset: { x: number; y: number };
+const toPath2D = (points: Points): Path2D => {
+  return (points._path2d = new Path2D(
+    spline.svgPath(spline.points(points.map((p) => [p.x, p.y])))
+  ));
 };
 
-class App extends Component<{}, State> {
-  socket: WebSocket | null = null;
+export class App {
+  socket: WebSocket;
+  canvas: HTMLCanvasElement;
+  input: HTMLInputElement;
+  ctx: CanvasRenderingContext2D;
+  dpr: number = 1.0;
+
+  me: string | null = null;
+  doc: Doc | null = null;
+  shadow: Doc | null = null;
+
+  origin: Point = { x: 0, y: 0 };
+
+  currentPath: Path | null = null;
+  currentLabel: Label | null = null;
+
+  color: string;
+
+  reqId: number | null = null;
+  idleId: number | null = null;
 
   constructor() {
-    super();
+    this.input = this.createInput();
+    this.canvas = document.createElement("canvas");
+    this.canvas.style.width = "100%";
+    this.canvas.style.height = "100%";
+    document.body.appendChild(this.canvas);
+    document.body.appendChild(this.input);
+    this.ctx = this.canvas.getContext("2d") as CanvasRenderingContext2D;
 
-    this.state = {
-      me: null,
-      local: null,
-      remote: null,
-      currentPath: null,
-      currentLabel: null,
-      originOffset: {
-        x: 0,
-        y: 0,
-      },
-    };
+    this.resize();
+    window.addEventListener("resize", this.resize.bind(this));
+    window.addEventListener("contextmenu", (e) => e.preventDefault());
+    window.addEventListener("mousedown", this.onMouseDown.bind(this));
+    window.addEventListener("mousemove", this.onMouseMove.bind(this));
+    window.addEventListener("mouseup", this.onMouseUp.bind(this));
+    window.addEventListener("wheel", this.onMouseWheel.bind(this), {
+      passive: false,
+    });
+    window.addEventListener("keydown", (e) => {
+      if (!this.doc) return;
+
+      if (e.key === "Enter") {
+        this.enter();
+      } else if (e.key === "Escape") {
+        this.escape();
+      }
+    });
+
+    const colors = ["#3DE4B5", "#43B6E8", "#FFE65B", "#FF5F48", "#FFFFFF"];
+    const n = Math.round(Math.random() * 1000);
+    this.color = colors[n % colors.length];
+
+    this.socket = this.connect();
   }
 
-  handleMouseDown = (e: MouseEvent) => {
-    const point = this.fromScreen({ x: e.clientX, y: e.clientY });
-    this.setState({
-      currentPath: {
-        id: id("p"),
-        color,
-        points: [point],
-      },
-    });
-  };
+  createInput() {
+    const input = document.createElement("input");
+    input.type = "text";
+    input.placeholder = "Say something...";
+    input.style.display = "none";
+    input.style.top = "0";
+    input.style.left = "0";
+    input.addEventListener("blur", this.escape.bind(this));
+    input.addEventListener("input", (e) => {
+      if (!this.doc) return;
 
-  handleMouseMove = (e: MouseEvent) => {
-    if (!this.state.me || !this.state.local) return;
-
-    const point = this.fromScreen({ x: e.clientX, y: e.clientY });
-
-    let { local, me, currentPath } = this.state;
-
-    currentPath = currentPath && {
-      ...currentPath,
-      points: [...currentPath.points, point],
-    };
-
-    local = updateCursor(local, me, point, color);
-    local = updateCurrentPath(local, currentPath);
-
-    this.setState(
-      {
-        currentPath,
-        local,
-      },
-      this.update
-    );
-  };
-
-  handleMouseUp = (e: MouseEvent) => {
-    if (!this.state.currentPath || !this.state.local) return;
-
-    if (this.state.currentPath.points.length < 4) {
-      this.setState({
-        currentLabel: {
-          id: id("l"),
-          text: "",
-          color: color,
-          pos: this.fromScreen({ x: e.clientX, y: e.clientY }),
-        },
-        currentPath: null,
-      });
-      return;
-    }
-    const point = { x: e.clientX, y: e.clientY };
-
-    const { currentPath, local } = this.state;
-
-    const simplified = Simplify(currentPath.points, 0.5, true);
-
-    this.setState({
-      local: {
-        ...local,
-        paths: {
-          ...local.paths,
-          [currentPath.id]: {
-            ...local.paths[currentPath.id],
-            points: simplified,
+      if (this.currentLabel) {
+        this.currentLabel = {
+          ...this.currentLabel,
+          text: this.input.value,
+        };
+        this.doc = {
+          ...this.doc,
+          items: {
+            ...this.doc.items,
+            [this.currentLabel.id]: {
+              ...this.currentLabel,
+            },
           },
-        },
-      },
-      currentPath: null,
+        };
+
+        this.r();
+        this.s();
+      }
     });
-  };
-
-  handleWheel = (e: MouseWheelEvent) => {
-    const { x, y } = this.state.originOffset;
-    this.setState({
-      originOffset: {
-        x: x + e.deltaX,
-        y: y + e.deltaY,
-      },
-    });
-  };
-
-  handleKeyUp = (e: KeyboardEvent) => {
-    // Escape - cancel current label
-    if (e.code === "Escape") {
-      this.setState({
-        currentLabel: null,
-      });
-    }
-
-    // Ctrl-N - new drawing / clear the screen
-    if (e.ctrlKey && e.code === "KeyN") {
-      this.setState(
-        {
-          local: init(),
-        },
-        this.update
-      );
-    }
-  };
-
-  componentDidMount() {
-    this.connect();
-
-    window.addEventListener("mousedown", this.handleMouseDown);
-    window.addEventListener("mousemove", this.handleMouseMove);
-    window.addEventListener("mouseup", this.handleMouseUp);
-    window.addEventListener("wheel", this.handleWheel);
-
-    window.addEventListener("keyup", this.handleKeyUp);
+    return input;
   }
 
-  connect = () => {
+  showInput(e: MouseEvent) {
+    this.input.value = "";
+    this.input.style.display = "block";
+    this.input.focus();
+  }
+
+  updateInput() {
+    if (this.currentLabel) {
+      this.input.style.color = this.color;
+      this.input.style.left = this.currentLabel.pos.x + this.origin.x + "px";
+      this.input.style.top = this.currentLabel.pos.y + this.origin.y + "px";
+      this.input.style.display = "block";
+    } else {
+      this.input.style.display = "none";
+    }
+  }
+
+  enter() {
+    this.currentLabel = null;
+    this.currentPath = null;
+
+    this.r();
+    this.s();
+  }
+
+  escape() {
+    if (!this.doc) return;
+
+    if (this.currentLabel) delete this.doc.items[this.currentLabel.id];
+    // if (this.currentPath) delete this.doc.items[this.currentPath.id];
+    this.currentLabel = null;
+    // this.currentPath = null;
+
+    this.r();
+    this.s();
+  }
+
+  resize() {
+    this.dpr = window.devicePixelRatio || 1.0;
+    this.canvas.width = window.innerWidth * this.dpr;
+    this.canvas.height = window.innerHeight * this.dpr;
+
+    this.r();
+  }
+
+  connect() {
     const scheme = window.location.protocol === "https:" ? "wss:" : "ws:";
     const host = window.location.host;
 
-    const socket = (this.socket = new WebSocket(
-      `${scheme}//${host}/sketch/ws`
-    ));
+    this.socket = new WebSocket(`${scheme}//${host}/sketch/ws`);
 
-    socket.addEventListener("open", (event) => {
+    this.socket.addEventListener("open", (event) => {
       console.log("Open");
     });
 
-    socket.addEventListener("error", (event) => {
+    this.socket.addEventListener("error", (event) => {
       console.error(event);
       setTimeout(this.connect, 500);
     });
 
-    socket.addEventListener("close", (event) => {
+    this.socket.addEventListener("close", (event) => {
       setTimeout(() => this.connect(), 1000);
     });
 
-    socket.addEventListener("message", (event) => {
+    this.socket.addEventListener("message", (event) => {
       const data = JSON.parse(event.data);
-      const delta = data.delta;
+
       if (data.init) {
-        this.setState({
-          me: data.you,
-          local: data.init,
-          remote: data.init,
-        });
+        this.me = data.you;
+        this.doc = data.init;
+        this.shadow = data.init;
       }
 
-      if (delta) {
-        const { local, remote } = this.state;
-        if (local === null || remote === null) return;
+      if (!this.me || !this.doc || !this.shadow) return;
 
+      const delta = data.delta;
+      if (delta) {
         try {
-          const newLocal = patcher.patch(local, delta) as unknown;
-          const newRemote = patcher.patch(remote, delta) as unknown;
-          this.setState({
-            local: newLocal as Doc,
-            remote: newRemote as Doc,
-          });
+          this.doc = (patcher.patch(this.doc, delta) as unknown) as Doc;
+          this.shadow = (patcher.patch(this.shadow, delta) as unknown) as Doc;
         } catch (error) {
           console.error(error);
         }
       }
+
+      this.r();
+      this.s();
     });
+
+    return this.socket;
+  }
+
+  onMouseWheel(e: WheelEvent) {
+    e.stopImmediatePropagation();
+    e.preventDefault();
+
+    this.origin.x -= e.deltaX;
+    this.origin.y -= e.deltaY;
+
+    this.onMouseMove(e);
+  }
+
+  onMouseDown(e: MouseEvent) {
+    e.preventDefault();
+    const point = this.fromScreen({ x: e.clientX, y: e.clientY });
+
+    this.currentLabel = null;
+    this.currentPath = {
+      type: "path",
+      id: id("p"),
+      color: this.color,
+      points: [point],
+    };
+
+    this.r();
+  }
+
+  onMouseMove(e: MouseEvent) {
+    if (!this.doc || !this.me) return;
+
+    const pos = this.fromScreen({ x: e.clientX, y: e.clientY });
+    const cursor = { ...pos, color: this.color };
+
+    this.doc = {
+      ...this.doc,
+      cursors: {
+        ...this.doc.cursors,
+        [this.me]: {
+          ...cursor,
+        },
+      },
+    };
+
+    if (this.currentPath) {
+      this.currentPath = {
+        ...this.currentPath,
+        points: [...this.currentPath.points, pos],
+      };
+
+      if (this.currentPath.points.length > 3) {
+        this.doc = {
+          ...this.doc,
+          items: {
+            ...this.doc.items,
+            [this.currentPath.id]: {
+              ...this.currentPath,
+            },
+          },
+        };
+      }
+    }
+
+    this.r();
+    this.s();
+  }
+
+  onMouseUp(e: MouseEvent) {
+    if (!this.doc || !this.currentPath) return;
+
+    if (this.currentPath) {
+      if (this.currentPath.points.length > 3) {
+        const simplified = Simplify([...this.currentPath.points], 1, true);
+        this.doc = {
+          ...this.doc,
+          items: {
+            ...this.doc.items,
+            [this.currentPath.id]: {
+              ...this.currentPath,
+              points: Object.assign([], simplified, {
+                _path2d: toPath2D(simplified),
+              }),
+            },
+          },
+        };
+      } else {
+        const pos = this.fromScreen({ x: e.clientX, y: e.clientY - 36 / 2 });
+        this.currentLabel = {
+          type: "label",
+          id: id("l"),
+          color: this.color,
+          text: "",
+          pos,
+        };
+        this.doc = {
+          ...this.doc,
+          items: {
+            ...this.doc.items,
+            [this.currentLabel.id]: {
+              ...this.currentLabel,
+            },
+          },
+        };
+        this.showInput(e);
+      }
+    }
+
+    this.currentPath = null;
+
+    this.r();
+    this.s();
+  }
+
+  toScreen(p: Point): Point {
+    return {
+      x: p.x,
+      y: p.y,
+    };
+  }
+
+  fromScreen(p: Point): Point {
+    return {
+      x: p.x - this.origin.x,
+      y: p.y - this.origin.y,
+    };
+  }
+
+  s = () => {
+    if (this.idleId) cancelIdleCallback(this.idleId);
+    this.idleId = requestIdleCallback(this.sync, { timeout: 1000 });
   };
 
-  update = throttle(() => {
-    const { local, remote } = this.state;
-    if (local === null || remote === null || this.socket === null) return;
+  sync = () => {
+    const { doc, shadow } = this;
+    if (!doc || !shadow) return;
 
-    const delta = patcher.diff(remote, local);
-
-    if (delta.length > 0) {
+    const delta = patcher.diff(shadow, doc);
+    if (delta.length) {
       try {
         this.socket.send(JSON.stringify({ delta }));
       } catch (e) {
         console.error(e);
-        setTimeout(this.update, 100);
+        setTimeout(this.sync, 100);
       }
-
-      this.setState(({ local }) => ({
-        remote: local,
-      }));
+      this.shadow = this.doc;
     }
-  }, 100);
-
-  toScreen = ({ x, y }: Point): Point => {
-    return {
-      x: x + this.state.originOffset.x,
-      y: y + this.state.originOffset.y,
-    };
   };
 
-  fromScreen = ({ x, y }: Point): Point => {
-    return {
-      x: x - this.state.originOffset.x,
-      y: y - this.state.originOffset.y,
-    };
+  r = () => {
+    if (this.reqId) cancelAnimationFrame(this.reqId);
+    this.reqId = requestAnimationFrame(this.render);
   };
 
-  render() {
-    if (!this.state.local) return null;
+  render = () => {
+    const { doc } = this;
+    if (!doc) return;
 
-    const { local, currentLabel, currentPath } = this.state;
+    const { ctx, dpr } = this;
 
-    return (
-      <>
-        {Object.values(this.state.local.paths).map((path) => (
-          <svg
-            className="path"
-            xmlns="http://www.w3.org/2000/svg"
-            width="100%"
-            height="100%"
-          >
-            <path
-              key={path.id}
-              stroke={path.color}
-              stroke-width="3"
-              stroke-linecap="round"
-              stroke-linejoin="round"
-              fill="transparent"
-              // style="filter:url(#line-shadow);"
-              vector-effect="non-scaling-stroke"
-              d={svgPath(
-                points(path.points.map(this.toScreen).map((p) => [p.x, p.y]))
-              )}
-            />
-          </svg>
-        ))}
-        {Object.values(this.state.local.labels).map((label) => {
-          return (
-            <span
-              className="label"
-              key={label.id}
-              style={{
-                left: this.toScreen(label.pos).x,
-                top: this.toScreen(label.pos).y - 32,
-                color: label.color,
-              }}
-            >
-              {label.text}
-            </span>
-          );
-        })}
+    ctx.clearRect(0, 0, this.canvas.width * dpr, this.canvas.height * dpr);
 
-        {currentLabel && (
-          <input
-            style={{
-              left: this.toScreen(currentLabel.pos).x,
-              top: this.toScreen(currentLabel.pos).y - 32,
-              color: currentLabel.color,
-            }}
-            type="text"
-            placeholder="Say something..."
-            onBlur={(e) => {
-              // this.setState({ currentLabel: null });
-            }}
-            onKeyDown={(e) => {
-              if (currentLabel === null) return;
-              if (e.target === null) return;
+    ctx.save();
+    ctx.scale(this.dpr, this.dpr);
+    ctx.translate(this.origin.x, this.origin.y);
 
-              if (e.key === "Enter") {
-                this.setState(
-                  {
-                    local: {
-                      ...local,
-                      labels: {
-                        ...local.labels,
-                        [currentLabel.id]: {
-                          ...currentLabel,
-                          text: (e.target as HTMLInputElement).value,
-                        },
-                      },
-                    },
-                    currentLabel: null,
-                  },
-                  this.update
-                );
-              }
-            }}
-            ref={(e) => {
-              if (e) e.focus();
-            }}
-          />
-        )}
-        <svg
-          xmlns="http://www.w3.org/2000/svg"
-          width="100%"
-          height="100%"
-          style={{
-            filter: currentPath
-              ? "drop-shadow(0px 0px 7px #fff)"
-              : "drop-shadow(0px 0px 3px #fff)",
-          }}
-        >
-          {Object.values(this.state.local.cursors).map((cursor, i) => (
-            <rect
-              key={i}
-              x={this.toScreen(cursor).x - 2}
-              y={this.toScreen(cursor).y - 2}
-              width={4}
-              height={4}
-              fill={cursor.color}
-              rx={0}
-            />
-          ))}
-        </svg>
-      </>
-    );
-  }
+    Object.values(doc.items).map((item) => {
+      if (item.type === "path") {
+        ctx.save();
+        ctx.lineWidth = 3;
+        ctx.strokeStyle = item.color;
+        // ctx.shadowColor = "rgba(0,0,0,0.6)";
+        // ctx.shadowBlur = 4;
+        ctx.lineCap = "round";
+        ctx.lineJoin = "round";
+
+        const path2d = item.points._path2d || toPath2D(item.points);
+
+        ctx.stroke(path2d);
+        ctx.restore();
+      } else if (item.type === "label") {
+        if (this.currentLabel && this.currentLabel.id === item.id) return;
+        ctx.save();
+        ctx.font = "32px ISO, monospace";
+        ctx.textBaseline = "bottom";
+        ctx.fillStyle = item.color;
+        // ctx.shadowColor = "rgba(0,0,0,0.6)";
+        // ctx.shadowOffsetY = 1;
+        // ctx.shadowBlur = 1;
+
+        ctx.fillText(item.text, item.pos.x, item.pos.y + 33); // Magic number
+        ctx.restore();
+      } else {
+        //
+      }
+    });
+
+    ctx.save();
+    Object.values(doc.cursors).map((cursor) => {
+      const p = this.toScreen(cursor);
+      ctx.fillStyle = cursor.color;
+      // ctx.shadowColor = "rgba(255,255,255,1)";
+
+      // if (this.currentPath) {
+      //   ctx.shadowBlur = 15 * devicePixelRatio;
+      // } else {
+      //   ctx.shadowBlur = 5 * devicePixelRatio;
+      // }
+      ctx.fillRect(p.x - 2, p.y - 2, 4, 4);
+    });
+    ctx.restore();
+
+    this.updateInput();
+
+    ctx.restore();
+  };
 }
 
-const app = document.getElementById("app");
-if (app) {
-  render(<App />, app);
-}
+(window as any).app = new App();

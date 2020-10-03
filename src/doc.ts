@@ -1,59 +1,49 @@
 export type Point = { x: number; y: number };
+export type Cursor = { x: number; y: number; color: string };
+
+export type Points = Point[] & { _path2d?: Path2D };
 
 export type Path = {
+  type: "path";
   id: string;
   color: string;
-  points: Point[];
+  points: Points;
 };
 
 export type Label = {
+  type: "label";
   id: string;
   color: string;
   text: string;
   pos: Point;
 };
 
+export type Item = Path | Label;
+
 export type Doc = {
   cursors: {
-    [userId: string]: { x: number; y: number; color: string };
+    [userId: string]: Cursor;
   };
-  paths: {
-    [id: string]: Path;
-  };
-  labels: {
-    [id: string]: Label;
+  items: {
+    [id: string]: Item;
   };
 };
 
 export const init = (): Doc => ({
   cursors: {},
-  paths: {},
-  labels: {},
+  items: {},
 });
 
 export const updateCursor = (
   doc: Doc,
   userId: string,
-  position: Point,
-  color: string
+  cursor: Cursor
 ): Doc => ({
   ...doc,
   cursors: {
     ...doc.cursors,
     [userId as string]: {
-      ...position,
-      color,
+      ...cursor,
     },
   },
 });
-
-export const updateCurrentPath = (doc: Doc, path: Path | null): Doc =>
-  path === null || path.points.length < 4
-    ? doc
-    : {
-        ...doc,
-        paths: {
-          ...doc.paths,
-          [path.id]: path,
-        },
-      };
