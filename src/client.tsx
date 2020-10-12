@@ -59,7 +59,14 @@ export class App {
     window.addEventListener("keydown", (e) => {
       if (!this.doc) return;
 
-      if (e.key === "Enter") {
+      if (e.code === "KeyA" && e.metaKey) {
+        this.doc = {
+          ...this.doc,
+          items: {},
+        };
+        this.s();
+        this.r();
+      } else if (e.key === "Enter") {
         this.enter();
       } else if (e.key === "Escape") {
         this.escape();
@@ -343,6 +350,43 @@ export class App {
     }
   };
 
+  drawPath(path: Path) {
+    const ctx = this.ctx;
+
+    ctx.save();
+    ctx.lineWidth = 3;
+    ctx.lineCap = "round";
+    ctx.lineJoin = "round";
+
+    const path2d = path.points._path2d || toPath2D(path.points);
+
+    ctx.translate(0, 1);
+    ctx.strokeStyle = "rgba(0,0,0,0.5)";
+    ctx.stroke(path2d);
+    ctx.translate(0, -1);
+
+    ctx.strokeStyle = path.color;
+    ctx.stroke(path2d);
+
+    ctx.restore();
+  }
+
+  drawLabel(label: Label) {
+    const ctx = this.ctx;
+
+    ctx.save();
+    ctx.font = "32px ISO, monospace";
+    ctx.textBaseline = "bottom";
+
+    ctx.fillStyle = "rgba(0,0,0,0.5)";
+    ctx.fillText(label.text, label.pos.x, label.pos.y + 34); // Magic number
+
+    ctx.fillStyle = label.color;
+    ctx.fillText(label.text, label.pos.x, label.pos.y + 33); // Magic number
+
+    ctx.restore();
+  }
+
   r = () => {
     if (this.reqId) cancelAnimationFrame(this.reqId);
     this.reqId = requestAnimationFrame(this.render);
@@ -362,30 +406,10 @@ export class App {
 
     Object.values(doc.items).map((item) => {
       if (item.type === "path") {
-        ctx.save();
-        ctx.lineWidth = 3;
-        ctx.strokeStyle = item.color;
-        // ctx.shadowColor = "rgba(0,0,0,0.6)";
-        // ctx.shadowBlur = 4;
-        ctx.lineCap = "round";
-        ctx.lineJoin = "round";
-
-        const path2d = item.points._path2d || toPath2D(item.points);
-
-        ctx.stroke(path2d);
-        ctx.restore();
+        this.drawPath(item);
       } else if (item.type === "label") {
         if (this.currentLabel && this.currentLabel.id === item.id) return;
-        ctx.save();
-        ctx.font = "32px ISO, monospace";
-        ctx.textBaseline = "bottom";
-        ctx.fillStyle = item.color;
-        // ctx.shadowColor = "rgba(0,0,0,0.6)";
-        // ctx.shadowOffsetY = 1;
-        // ctx.shadowBlur = 1;
-
-        ctx.fillText(item.text, item.pos.x, item.pos.y + 33); // Magic number
-        ctx.restore();
+        this.drawLabel(item);
       } else {
         //
       }
