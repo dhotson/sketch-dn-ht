@@ -2,3 +2,5 @@ tags
 node_modules
 public/*.js
 public/*.js.map
+src/server.js
+src/server.js.map

@@ -4,10 +4,11 @@
   "main": "src/server.ts",
   "license": "MIT",
   "scripts": {
-    "watch": "nodemon --watch src/client.tsx --exec yarn build",
-    "start-dev": "nodemon src/server.ts",
-    "build": "esbuild --sourcemap --bundle src/client.tsx --outfile=public/client.js ",
-    "start": "ts-node src/server.ts"
+    "dev": "yarn start & nodemon --watch src/client.tsx --exec yarn build-client",
+    "start": "nodemon src/server.ts",
+    "build": "yarn build-client && yarn build-server",
+    "build-client": "esbuild --sourcemap --bundle src/client.tsx --outfile=public/client.js",
+    "build-server": "esbuild --platform=node --sourcemap --bundle src/server.ts --outfile=src/server.js"
   },
   "dependencies": {
     "@tsconfig/recommended": "^1.0.1",
